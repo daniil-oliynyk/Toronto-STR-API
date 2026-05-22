@@ -15,12 +15,12 @@ type Config struct {
 }
 
 func Load() (Config, error) {
-	databaseURL := strings.TrimSpace(os.Getenv("DATABASE_URL"))
+	databaseURL := strings.TrimSpace(os.Getenv("SUPABASE_URL"))
 	if databaseURL == "" {
-		return Config{}, fmt.Errorf("DATABASE_URL is required")
+		return Config{}, fmt.Errorf("SUPABASE_URL is required")
 	}
 	if _, err := url.ParseRequestURI(databaseURL); err != nil {
-		return Config{}, fmt.Errorf("DATABASE_URL is invalid: %w", err)
+		return Config{}, fmt.Errorf("SUPABASE_URL is invalid: %w", err)
 	}
 
 	port := strings.TrimSpace(os.Getenv("PORT"))

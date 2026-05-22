@@ -12,6 +12,7 @@ import (
 
 	"github.com/daniil-oliynyk/go-api/internal/config"
 	"github.com/daniil-oliynyk/go-api/internal/httpapi"
+	"github.com/daniil-oliynyk/go-api/internal/store"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -31,8 +32,11 @@ func main() {
 	}
 	defer pool.Close()
 
+	listingsRepository := store.NewListingsRepository(pool)
 	router := httpapi.NewRouter(httpapi.Dependencies{
 		ReadinessChecker: pool,
+		MetadataProvider: listingsRepository,
+		ListingProvider:  listingsRepository,
 	})
 
 	server := &http.Server{
