@@ -24,10 +24,16 @@ type ListingProvider interface {
 	GetListing(ctx context.Context, id string) (store.Listing, error)
 }
 
+type MapProvider interface {
+	ListMapListings(ctx context.Context, query store.MapListingsQuery) ([]store.MapListing, error)
+	ListMapClusters(ctx context.Context, query store.MapListingsQuery) ([]store.MapCluster, error)
+}
+
 type Dependencies struct {
 	ReadinessChecker ReadinessChecker
 	MetadataProvider MetadataProvider
 	ListingProvider  ListingProvider
+	MapProvider      MapProvider
 }
 
 func NewRouter(deps Dependencies) http.Handler {
@@ -40,7 +46,7 @@ func NewRouter(deps Dependencies) http.Handler {
 	router.Get("/healthz", healthzHandler)
 	router.Get("/readyz", readyzHandler(deps.ReadinessChecker))
 	router.Get("/api/meta", metaHandler(deps.MetadataProvider))
-	router.Get("/api/listings/map", mapListingsHandler)
+	router.Get("/api/listings/map", mapListingsHandler(deps.MapProvider))
 	router.Get("/api/listings/{id}", listingDetailHandler(deps.ListingProvider))
 
 	return router
@@ -168,18 +174,148 @@ func listingDetailHandler(provider ListingProvider) http.HandlerFunc {
 	}
 }
 
-func mapListingsHandler(w http.ResponseWriter, r *http.Request) {
-	if _, err := parseMapQuery(r.URL.Query()); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": err.Error(),
+type geoJSONFeatureCollection struct {
+	Type     string           `json:"type"`
+	Features []geoJSONFeature `json:"features"`
+}
+
+type geoJSONFeature struct {
+	Type       string               `json:"type"`
+	ID         string               `json:"id,omitempty"`
+	Geometry   geoJSONPoint         `json:"geometry"`
+	Properties mapListingProperties `json:"properties"`
+}
+
+type geoJSONPoint struct {
+	Type        string     `json:"type"`
+	Coordinates [2]float64 `json:"coordinates"`
+}
+
+type mapListingProperties struct {
+	Cluster         bool       `json:"cluster"`
+	Count           int        `json:"count,omitempty"`
+	ID              string     `json:"id,omitempty"`
+	Address         string     `json:"address,omitempty"`
+	PostalCode      string     `json:"postalCode,omitempty"`
+	PropertyType    *string    `json:"propertyType,omitempty"`
+	WardNumber      *string    `json:"wardNumber,omitempty"`
+	WardName        *string    `json:"wardName,omitempty"`
+	SourceUpdatedAt *time.Time `json:"sourceUpdatedAt,omitempty"`
+	IngestedAt      *time.Time `json:"ingestedAt,omitempty"`
+}
+
+func mapListingsHandler(provider MapProvider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		query, err := parseMapQuery(r.URL.Query())
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": err.Error(),
+			})
+			return
+		}
+
+		if provider == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{
+				"error": "map provider is not configured",
+			})
+			return
+		}
+
+		storeQuery := store.MapListingsQuery{
+			BBox: store.BBox{
+				West:  query.BBox.West,
+				South: query.BBox.South,
+				East:  query.BBox.East,
+				North: query.BBox.North,
+			},
+			Zoom:         query.Zoom,
+			Search:       query.Search,
+			PropertyType: query.PropertyType,
+		}
+
+		if query.Zoom < 14 {
+			clusters, err := provider.ListMapClusters(r.Context(), storeQuery)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{
+					"error": "failed to load map clusters",
+				})
+				return
+			}
+
+			writeJSON(w, http.StatusOK, mapClustersFeatureCollection(clusters))
+			return
+		}
+
+		listings, err := provider.ListMapListings(r.Context(), storeQuery)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{
+				"error": "failed to load map listings",
+			})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, mapListingsFeatureCollection(listings))
+	}
+}
+
+func emptyFeatureCollection() geoJSONFeatureCollection {
+	return geoJSONFeatureCollection{
+		Type:     "FeatureCollection",
+		Features: []geoJSONFeature{},
+	}
+}
+
+func mapListingsFeatureCollection(listings []store.MapListing) geoJSONFeatureCollection {
+	features := make([]geoJSONFeature, 0, len(listings))
+	for _, listing := range listings {
+		features = append(features, geoJSONFeature{
+			Type: "Feature",
+			ID:   listing.ID,
+			Geometry: geoJSONPoint{
+				Type:        "Point",
+				Coordinates: [2]float64{listing.Longitude, listing.Latitude},
+			},
+			Properties: mapListingProperties{
+				Cluster:         false,
+				ID:              listing.ID,
+				Address:         listing.Address,
+				PostalCode:      listing.PostalCode,
+				PropertyType:    listing.PropertyType,
+				WardNumber:      listing.WardNumber,
+				WardName:        listing.WardName,
+				SourceUpdatedAt: listing.SourceUpdatedAt,
+				IngestedAt:      &listing.IngestedAt,
+			},
 		})
-		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"type":     "FeatureCollection",
-		"features": []any{},
-	})
+	return geoJSONFeatureCollection{
+		Type:     "FeatureCollection",
+		Features: features,
+	}
+}
+
+func mapClustersFeatureCollection(clusters []store.MapCluster) geoJSONFeatureCollection {
+	features := make([]geoJSONFeature, 0, len(clusters))
+	for _, cluster := range clusters {
+		features = append(features, geoJSONFeature{
+			Type: "Feature",
+			ID:   cluster.ID,
+			Geometry: geoJSONPoint{
+				Type:        "Point",
+				Coordinates: [2]float64{cluster.Longitude, cluster.Latitude},
+			},
+			Properties: mapListingProperties{
+				Cluster: true,
+				Count:   cluster.Count,
+			},
+		})
+	}
+
+	return geoJSONFeatureCollection{
+		Type:     "FeatureCollection",
+		Features: features,
+	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

@@ -37,6 +37,7 @@ func main() {
 		ReadinessChecker: pool,
 		MetadataProvider: listingsRepository,
 		ListingProvider:  listingsRepository,
+		MapProvider:      listingsRepository,
 	})
 
 	server := &http.Server{
