@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/daniil-oliynyk/go-api/internal/store"
@@ -29,11 +30,17 @@ type MapProvider interface {
 	ListMapClusters(ctx context.Context, query store.MapListingsQuery) ([]store.MapCluster, error)
 }
 
+type StatsProvider interface {
+	ListWardStats(ctx context.Context, query store.MapListingsQuery) ([]store.WardCount, error)
+}
+
 type Dependencies struct {
 	ReadinessChecker ReadinessChecker
 	MetadataProvider MetadataProvider
 	ListingProvider  ListingProvider
 	MapProvider      MapProvider
+	StatsProvider    StatsProvider
+	CORSOrigins      []string
 }
 
 func NewRouter(deps Dependencies) http.Handler {
@@ -42,18 +49,50 @@ func NewRouter(deps Dependencies) http.Handler {
 	router.Use(middleware.RequestID)
 	router.Use(middleware.RealIP)
 	router.Use(middleware.Recoverer)
+	router.Use(corsMiddleware(deps.CORSOrigins))
 
 	router.Get("/healthz", healthzHandler)
 	router.Get("/readyz", readyzHandler(deps.ReadinessChecker))
 	router.Get("/api/meta", metaHandler(deps.MetadataProvider))
 	router.Get("/api/listings/map", mapListingsHandler(deps.MapProvider))
 	router.Get("/api/listings/{id}", listingDetailHandler(deps.ListingProvider))
+	router.Get("/api/stats/wards", wardStatsHandler(deps.StatsProvider))
 
 	return router
 }
 
 func healthzHandler(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func corsMiddleware(allowedOrigins []string) func(http.Handler) http.Handler {
+	allowed := make(map[string]struct{}, len(allowedOrigins))
+	for _, origin := range allowedOrigins {
+		origin = strings.TrimSpace(origin)
+		if origin == "" {
+			continue
+		}
+		allowed[origin] = struct{}{}
+	}
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			origin := r.Header.Get("Origin")
+			if _, ok := allowed[origin]; ok {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+				w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+				w.Header().Add("Vary", "Origin")
+			}
+
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func readyzHandler(checker ReadinessChecker) http.HandlerFunc {
@@ -315,6 +354,73 @@ func mapClustersFeatureCollection(clusters []store.MapCluster) geoJSONFeatureCol
 	return geoJSONFeatureCollection{
 		Type:     "FeatureCollection",
 		Features: features,
+	}
+}
+
+type wardStatsResponse struct {
+	Total int                 `json:"total"`
+	Wards []wardCountResponse `json:"wards"`
+}
+
+type wardCountResponse struct {
+	WardNumber *string `json:"wardNumber"`
+	WardName   *string `json:"wardName"`
+	Count      int     `json:"count"`
+}
+
+func wardStatsHandler(provider StatsProvider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		query, err := parseStatsQuery(r.URL.Query())
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": err.Error(),
+			})
+			return
+		}
+
+		if provider == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{
+				"error": "stats provider is not configured",
+			})
+			return
+		}
+
+		wardCounts, err := provider.ListWardStats(r.Context(), store.MapListingsQuery{
+			BBox: store.BBox{
+				West:  query.BBox.West,
+				South: query.BBox.South,
+				East:  query.BBox.East,
+				North: query.BBox.North,
+			},
+			Search:       query.Search,
+			PropertyType: query.PropertyType,
+		})
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{
+				"error": "failed to load ward stats",
+			})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, wardStatsResponseFromStore(wardCounts))
+	}
+}
+
+func wardStatsResponseFromStore(wardCounts []store.WardCount) wardStatsResponse {
+	wards := make([]wardCountResponse, 0, len(wardCounts))
+	total := 0
+	for _, wardCount := range wardCounts {
+		total += wardCount.Count
+		wards = append(wards, wardCountResponse{
+			WardNumber: wardCount.WardNumber,
+			WardName:   wardCount.WardName,
+			Count:      wardCount.Count,
+		})
+	}
+
+	return wardStatsResponse{
+		Total: total,
+		Wards: wards,
 	}
 }
 

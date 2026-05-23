@@ -76,6 +76,12 @@ type MapCluster struct {
 	Longitude float64
 }
 
+type WardCount struct {
+	WardNumber *string
+	WardName   *string
+	Count      int
+}
+
 func NewListingsRepository(db Querier) *ListingsRepository {
 	return &ListingsRepository{db: db}
 }
@@ -340,6 +346,45 @@ func (r *ListingsRepository) ListMapClusters(ctx context.Context, query MapListi
 	}
 
 	return clusters, nil
+}
+
+func (r *ListingsRepository) ListWardStats(ctx context.Context, query MapListingsQuery) ([]WardCount, error) {
+	filterSQL, args := mapFilterSQL(query)
+	querySQL := `
+		SELECT
+			ward_number,
+			ward_name,
+			count(*)::integer AS listing_count
+		FROM "Listings"
+		WHERE ` + filterSQL + `
+		GROUP BY ward_number, ward_name
+		ORDER BY listing_count DESC, ward_number NULLS LAST, ward_name NULLS LAST
+	`
+
+	rows, err := r.db.Query(ctx, querySQL, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list ward stats: %w", err)
+	}
+	defer rows.Close()
+
+	wardCounts := []WardCount{}
+	for rows.Next() {
+		var wardCount WardCount
+		var wardNumber sql.NullString
+		var wardName sql.NullString
+		if err := rows.Scan(&wardNumber, &wardName, &wardCount.Count); err != nil {
+			return nil, fmt.Errorf("scan ward stat: %w", err)
+		}
+
+		wardCount.WardNumber = nullableStringPtr(wardNumber)
+		wardCount.WardName = nullableStringPtr(wardName)
+		wardCounts = append(wardCounts, wardCount)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate ward stats: %w", err)
+	}
+
+	return wardCounts, nil
 }
 
 func mapFilterSQL(query MapListingsQuery) (string, []any) {

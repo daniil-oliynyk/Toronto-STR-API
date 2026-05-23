@@ -38,6 +38,8 @@ func main() {
 		MetadataProvider: listingsRepository,
 		ListingProvider:  listingsRepository,
 		MapProvider:      listingsRepository,
+		StatsProvider:    listingsRepository,
+		CORSOrigins:      cfg.CORSAllowedOrigins,
 	})
 
 	server := &http.Server{
