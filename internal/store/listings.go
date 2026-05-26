@@ -482,23 +482,23 @@ func clusterGridSizeMeters(zoom int) int {
 
 	switch {
 	case zoom <= 9:
-		slog.Debug("cluster grid size selected", "zoom", zoom, "grid_size_meters", 40000)
-		return 40000
+		slog.Debug("cluster grid size selected", "zoom", zoom, "grid_size_meters", 30000)
+		return 30000
 	case zoom == 10:
-		slog.Debug("cluster grid size selected", "zoom", zoom, "grid_size_meters", 25000)
-		return 25000
+		slog.Debug("cluster grid size selected", "zoom", zoom, "grid_size_meters", 18000)
+		return 18000
 	case zoom == 11:
-		slog.Debug("cluster grid size selected", "zoom", zoom, "grid_size_meters", 15000)
-		return 15000
+		slog.Debug("cluster grid size selected", "zoom", zoom, "grid_size_meters", 10000)
+		return 10000
 	case zoom == 12:
-		slog.Debug("cluster grid size selected", "zoom", zoom, "grid_size_meters", 8000)
-		return 8000
+		slog.Debug("cluster grid size selected", "zoom", zoom, "grid_size_meters", 5000)
+		return 5000
 	case zoom == 13:
-		slog.Debug("cluster grid size selected", "zoom", zoom, "grid_size_meters", 4000)
-		return 4000
+		slog.Debug("cluster grid size selected", "zoom", zoom, "grid_size_meters", 3000)
+		return 3000
 	default:
-		slog.Debug("cluster grid size selected", "zoom", zoom, "grid_size_meters", 2000)
-		return 2000
+		slog.Debug("cluster grid size selected", "zoom", zoom, "grid_size_meters", 1500)
+		return 1500
 	}
 }
 

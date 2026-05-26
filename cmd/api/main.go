@@ -14,6 +14,7 @@ import (
 	"github.com/daniil-oliynyk/go-api/internal/config"
 	"github.com/daniil-oliynyk/go-api/internal/httpapi"
 	"github.com/daniil-oliynyk/go-api/internal/store"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -39,7 +40,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	pool, err := pgxpool.New(context.Background(), cfg.DatabaseURL)
+	poolCfg, err := pgxpool.ParseConfig(cfg.DatabaseURL)
+	if err != nil {
+		logger.Error("database pool config parsing failed", "error", err)
+		os.Exit(1)
+	}
+	poolCfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
+
+	pool, err := pgxpool.NewWithConfig(context.Background(), poolCfg)
 	if err != nil {
 		logger.Error("database pool initialization failed", "error", err)
 		os.Exit(1)
