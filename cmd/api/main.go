@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"log/slog"
 	"net/http"
 	"os"
@@ -17,7 +18,20 @@ import (
 )
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	debugLogs := flag.Bool("debug", false, "enable debug logs")
+	flag.Parse()
+
+	logLevel := slog.LevelInfo
+	if *debugLogs {
+		logLevel = slog.LevelDebug
+	}
+
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: logLevel,
+	}))
+	slog.SetDefault(logger)
+	logger.Debug("function entry", "function", "main")
+	defer logger.Debug("function exit", "function", "main")
 
 	cfg, err := config.Load()
 	if err != nil {

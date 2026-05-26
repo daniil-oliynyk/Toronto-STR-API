@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -44,6 +45,9 @@ type Dependencies struct {
 }
 
 func NewRouter(deps Dependencies) http.Handler {
+	slog.Debug("function entry", "function", "httpapi.NewRouter", "cors_origin_count", len(deps.CORSOrigins))
+	defer slog.Debug("function exit", "function", "httpapi.NewRouter")
+
 	router := chi.NewRouter()
 
 	router.Use(middleware.RequestID)
@@ -62,10 +66,16 @@ func NewRouter(deps Dependencies) http.Handler {
 }
 
 func healthzHandler(w http.ResponseWriter, _ *http.Request) {
+	slog.Debug("function entry", "function", "httpapi.healthzHandler")
+	defer slog.Debug("function exit", "function", "httpapi.healthzHandler", "status", http.StatusOK)
+
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func corsMiddleware(allowedOrigins []string) func(http.Handler) http.Handler {
+	slog.Debug("function entry", "function", "httpapi.corsMiddleware", "origin_count", len(allowedOrigins))
+	defer slog.Debug("function exit", "function", "httpapi.corsMiddleware")
+
 	allowed := make(map[string]struct{}, len(allowedOrigins))
 	for _, origin := range allowedOrigins {
 		origin = strings.TrimSpace(origin)
@@ -76,7 +86,13 @@ func corsMiddleware(allowedOrigins []string) func(http.Handler) http.Handler {
 	}
 
 	return func(next http.Handler) http.Handler {
+		slog.Debug("function entry", "function", "httpapi.corsMiddleware.wrap")
+		defer slog.Debug("function exit", "function", "httpapi.corsMiddleware.wrap")
+
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			slog.DebugContext(r.Context(), "function entry", "function", "httpapi.corsMiddleware.handler", "method", r.Method, "path", r.URL.Path)
+			defer slog.DebugContext(r.Context(), "function exit", "function", "httpapi.corsMiddleware.handler", "method", r.Method, "path", r.URL.Path)
+
 			origin := r.Header.Get("Origin")
 			if _, ok := allowed[origin]; ok {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
@@ -86,6 +102,7 @@ func corsMiddleware(allowedOrigins []string) func(http.Handler) http.Handler {
 			}
 
 			if r.Method == http.MethodOptions {
+				slog.InfoContext(r.Context(), "cors preflight handled", "origin", origin, "path", r.URL.Path, "status", http.StatusNoContent)
 				w.WriteHeader(http.StatusNoContent)
 				return
 			}
@@ -96,8 +113,15 @@ func corsMiddleware(allowedOrigins []string) func(http.Handler) http.Handler {
 }
 
 func readyzHandler(checker ReadinessChecker) http.HandlerFunc {
+	slog.Debug("function entry", "function", "httpapi.readyzHandler")
+	defer slog.Debug("function exit", "function", "httpapi.readyzHandler")
+
 	return func(w http.ResponseWriter, r *http.Request) {
+		slog.DebugContext(r.Context(), "function entry", "function", "httpapi.readyzHandler.handler", "method", r.Method, "path", r.URL.Path)
+		defer slog.DebugContext(r.Context(), "function exit", "function", "httpapi.readyzHandler.handler", "method", r.Method, "path", r.URL.Path)
+
 		if checker == nil {
+			slog.ErrorContext(r.Context(), "readiness check failed", "reason", "checker_missing", "status", http.StatusServiceUnavailable)
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 				"status": "unavailable",
 				"error":  "readiness checker is not configured",
@@ -109,6 +133,7 @@ func readyzHandler(checker ReadinessChecker) http.HandlerFunc {
 		defer cancel()
 
 		if err := checker.Ping(ctx); err != nil {
+			slog.ErrorContext(r.Context(), "readiness check failed", "error", err, "status", http.StatusServiceUnavailable)
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 				"status": "unavailable",
 				"error":  "database is not reachable",
@@ -116,6 +141,7 @@ func readyzHandler(checker ReadinessChecker) http.HandlerFunc {
 			return
 		}
 
+		slog.InfoContext(r.Context(), "readiness check passed", "status", http.StatusOK)
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	}
 }
@@ -127,8 +153,15 @@ type metadataResponse struct {
 }
 
 func metaHandler(provider MetadataProvider) http.HandlerFunc {
+	slog.Debug("function entry", "function", "httpapi.metaHandler")
+	defer slog.Debug("function exit", "function", "httpapi.metaHandler")
+
 	return func(w http.ResponseWriter, r *http.Request) {
+		slog.DebugContext(r.Context(), "function entry", "function", "httpapi.metaHandler.handler", "method", r.Method, "path", r.URL.Path)
+		defer slog.DebugContext(r.Context(), "function exit", "function", "httpapi.metaHandler.handler", "method", r.Method, "path", r.URL.Path)
+
 		if provider == nil {
+			slog.ErrorContext(r.Context(), "metadata request failed", "reason", "provider_missing", "status", http.StatusInternalServerError)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{
 				"error": "metadata provider is not configured",
 			})
@@ -137,12 +170,14 @@ func metaHandler(provider MetadataProvider) http.HandlerFunc {
 
 		metadata, err := provider.GetMetadata(r.Context())
 		if err != nil {
+			slog.ErrorContext(r.Context(), "metadata request failed", "error", err, "status", http.StatusInternalServerError)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{
 				"error": "failed to load metadata",
 			})
 			return
 		}
 
+		slog.InfoContext(r.Context(), "metadata request completed", "total_listings", metadata.TotalListings, "property_type_count", len(metadata.PropertyTypes), "status", http.StatusOK)
 		writeJSON(w, http.StatusOK, metadataResponse{
 			TotalListings:             metadata.TotalListings,
 			PropertyTypes:             metadata.PropertyTypes,
@@ -166,8 +201,15 @@ type listingResponse struct {
 }
 
 func listingDetailHandler(provider ListingProvider) http.HandlerFunc {
+	slog.Debug("function entry", "function", "httpapi.listingDetailHandler")
+	defer slog.Debug("function exit", "function", "httpapi.listingDetailHandler")
+
 	return func(w http.ResponseWriter, r *http.Request) {
+		slog.DebugContext(r.Context(), "function entry", "function", "httpapi.listingDetailHandler.handler", "method", r.Method, "path", r.URL.Path)
+		defer slog.DebugContext(r.Context(), "function exit", "function", "httpapi.listingDetailHandler.handler", "method", r.Method, "path", r.URL.Path)
+
 		if provider == nil {
+			slog.ErrorContext(r.Context(), "listing detail request failed", "reason", "provider_missing", "status", http.StatusInternalServerError)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{
 				"error": "listing provider is not configured",
 			})
@@ -176,6 +218,7 @@ func listingDetailHandler(provider ListingProvider) http.HandlerFunc {
 
 		id := chi.URLParam(r, "id")
 		if id == "" {
+			slog.WarnContext(r.Context(), "listing detail request failed", "reason", "missing_id", "status", http.StatusNotFound)
 			writeJSON(w, http.StatusNotFound, map[string]string{
 				"error": "listing not found",
 			})
@@ -185,18 +228,21 @@ func listingDetailHandler(provider ListingProvider) http.HandlerFunc {
 		listing, err := provider.GetListing(r.Context(), id)
 		if err != nil {
 			if errors.Is(err, store.ErrNotFound) {
+				slog.WarnContext(r.Context(), "listing detail request failed", "listing_id", id, "error", err, "status", http.StatusNotFound)
 				writeJSON(w, http.StatusNotFound, map[string]string{
 					"error": "listing not found",
 				})
 				return
 			}
 
+			slog.ErrorContext(r.Context(), "listing detail request failed", "listing_id", id, "error", err, "status", http.StatusInternalServerError)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{
 				"error": "failed to load listing",
 			})
 			return
 		}
 
+		slog.InfoContext(r.Context(), "listing detail request completed", "listing_id", listing.ID, "status", http.StatusOK)
 		writeJSON(w, http.StatusOK, listingResponse{
 			ID:              listing.ID,
 			Address:         listing.Address,
@@ -243,10 +289,19 @@ type mapListingProperties struct {
 	IngestedAt      *time.Time `json:"ingestedAt,omitempty"`
 }
 
+const individualListingsMinZoom = 16
+
 func mapListingsHandler(provider MapProvider) http.HandlerFunc {
+	slog.Debug("function entry", "function", "httpapi.mapListingsHandler")
+	defer slog.Debug("function exit", "function", "httpapi.mapListingsHandler")
+
 	return func(w http.ResponseWriter, r *http.Request) {
+		slog.DebugContext(r.Context(), "function entry", "function", "httpapi.mapListingsHandler.handler", "method", r.Method, "path", r.URL.Path)
+		defer slog.DebugContext(r.Context(), "function exit", "function", "httpapi.mapListingsHandler.handler", "method", r.Method, "path", r.URL.Path)
+
 		query, err := parseMapQuery(r.URL.Query())
 		if err != nil {
+			slog.WarnContext(r.Context(), "map listings request failed", "error", err, "status", http.StatusBadRequest)
 			writeJSON(w, http.StatusBadRequest, map[string]string{
 				"error": err.Error(),
 			})
@@ -254,6 +309,7 @@ func mapListingsHandler(provider MapProvider) http.HandlerFunc {
 		}
 
 		if provider == nil {
+			slog.ErrorContext(r.Context(), "map listings request failed", "reason", "provider_missing", "status", http.StatusInternalServerError)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{
 				"error": "map provider is not configured",
 			})
@@ -272,32 +328,39 @@ func mapListingsHandler(provider MapProvider) http.HandlerFunc {
 			PropertyType: query.PropertyType,
 		}
 
-		if query.Zoom < 14 {
+		if query.Zoom < individualListingsMinZoom {
 			clusters, err := provider.ListMapClusters(r.Context(), storeQuery)
 			if err != nil {
+				slog.ErrorContext(r.Context(), "map clusters request failed", "zoom", query.Zoom, "error", err, "status", http.StatusInternalServerError)
 				writeJSON(w, http.StatusInternalServerError, map[string]string{
 					"error": "failed to load map clusters",
 				})
 				return
 			}
 
+			slog.InfoContext(r.Context(), "map clusters request completed", "zoom", query.Zoom, "cluster_count", len(clusters), "status", http.StatusOK)
 			writeJSON(w, http.StatusOK, mapClustersFeatureCollection(clusters))
 			return
 		}
 
 		listings, err := provider.ListMapListings(r.Context(), storeQuery)
 		if err != nil {
+			slog.ErrorContext(r.Context(), "map listings request failed", "zoom", query.Zoom, "error", err, "status", http.StatusInternalServerError)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{
 				"error": "failed to load map listings",
 			})
 			return
 		}
 
+		slog.InfoContext(r.Context(), "map listings request completed", "zoom", query.Zoom, "listing_count", len(listings), "status", http.StatusOK)
 		writeJSON(w, http.StatusOK, mapListingsFeatureCollection(listings))
 	}
 }
 
 func emptyFeatureCollection() geoJSONFeatureCollection {
+	slog.Debug("function entry", "function", "httpapi.emptyFeatureCollection")
+	defer slog.Debug("function exit", "function", "httpapi.emptyFeatureCollection")
+
 	return geoJSONFeatureCollection{
 		Type:     "FeatureCollection",
 		Features: []geoJSONFeature{},
@@ -305,6 +368,9 @@ func emptyFeatureCollection() geoJSONFeatureCollection {
 }
 
 func mapListingsFeatureCollection(listings []store.MapListing) geoJSONFeatureCollection {
+	slog.Debug("function entry", "function", "httpapi.mapListingsFeatureCollection", "listing_count", len(listings))
+	defer slog.Debug("function exit", "function", "httpapi.mapListingsFeatureCollection")
+
 	features := make([]geoJSONFeature, 0, len(listings))
 	for _, listing := range listings {
 		features = append(features, geoJSONFeature{
@@ -335,6 +401,9 @@ func mapListingsFeatureCollection(listings []store.MapListing) geoJSONFeatureCol
 }
 
 func mapClustersFeatureCollection(clusters []store.MapCluster) geoJSONFeatureCollection {
+	slog.Debug("function entry", "function", "httpapi.mapClustersFeatureCollection", "cluster_count", len(clusters))
+	defer slog.Debug("function exit", "function", "httpapi.mapClustersFeatureCollection")
+
 	features := make([]geoJSONFeature, 0, len(clusters))
 	for _, cluster := range clusters {
 		features = append(features, geoJSONFeature{
@@ -369,9 +438,16 @@ type wardCountResponse struct {
 }
 
 func wardStatsHandler(provider StatsProvider) http.HandlerFunc {
+	slog.Debug("function entry", "function", "httpapi.wardStatsHandler")
+	defer slog.Debug("function exit", "function", "httpapi.wardStatsHandler")
+
 	return func(w http.ResponseWriter, r *http.Request) {
+		slog.DebugContext(r.Context(), "function entry", "function", "httpapi.wardStatsHandler.handler", "method", r.Method, "path", r.URL.Path)
+		defer slog.DebugContext(r.Context(), "function exit", "function", "httpapi.wardStatsHandler.handler", "method", r.Method, "path", r.URL.Path)
+
 		query, err := parseStatsQuery(r.URL.Query())
 		if err != nil {
+			slog.WarnContext(r.Context(), "ward stats request failed", "error", err, "status", http.StatusBadRequest)
 			writeJSON(w, http.StatusBadRequest, map[string]string{
 				"error": err.Error(),
 			})
@@ -379,6 +455,7 @@ func wardStatsHandler(provider StatsProvider) http.HandlerFunc {
 		}
 
 		if provider == nil {
+			slog.ErrorContext(r.Context(), "ward stats request failed", "reason", "provider_missing", "status", http.StatusInternalServerError)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{
 				"error": "stats provider is not configured",
 			})
@@ -396,17 +473,22 @@ func wardStatsHandler(provider StatsProvider) http.HandlerFunc {
 			PropertyType: query.PropertyType,
 		})
 		if err != nil {
+			slog.ErrorContext(r.Context(), "ward stats request failed", "error", err, "status", http.StatusInternalServerError)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{
 				"error": "failed to load ward stats",
 			})
 			return
 		}
 
+		slog.InfoContext(r.Context(), "ward stats request completed", "ward_count", len(wardCounts), "status", http.StatusOK)
 		writeJSON(w, http.StatusOK, wardStatsResponseFromStore(wardCounts))
 	}
 }
 
 func wardStatsResponseFromStore(wardCounts []store.WardCount) wardStatsResponse {
+	slog.Debug("function entry", "function", "httpapi.wardStatsResponseFromStore", "ward_count", len(wardCounts))
+	defer slog.Debug("function exit", "function", "httpapi.wardStatsResponseFromStore")
+
 	wards := make([]wardCountResponse, 0, len(wardCounts))
 	total := 0
 	for _, wardCount := range wardCounts {
@@ -425,6 +507,9 @@ func wardStatsResponseFromStore(wardCounts []store.WardCount) wardStatsResponse 
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
+	slog.Debug("function entry", "function", "httpapi.writeJSON", "status", status)
+	defer slog.Debug("function exit", "function", "httpapi.writeJSON", "status", status)
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(payload)

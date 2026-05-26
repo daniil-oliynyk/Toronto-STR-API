@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 	"strconv"
@@ -15,11 +16,16 @@ type Config struct {
 }
 
 func Load() (Config, error) {
+	slog.Debug("function entry", "function", "config.Load")
+	defer slog.Debug("function exit", "function", "config.Load")
+
 	databaseURL := strings.TrimSpace(os.Getenv("SUPABASE_URL"))
 	if databaseURL == "" {
+		slog.Error("config load failed", "error", "SUPABASE_URL is required")
 		return Config{}, fmt.Errorf("SUPABASE_URL is required")
 	}
 	if _, err := url.ParseRequestURI(databaseURL); err != nil {
+		slog.Error("config load failed", "error", err)
 		return Config{}, fmt.Errorf("SUPABASE_URL is invalid: %w", err)
 	}
 
@@ -28,19 +34,27 @@ func Load() (Config, error) {
 		port = "8080"
 	}
 	if err := validatePort(port); err != nil {
+		slog.Error("config load failed", "error", err)
 		return Config{}, err
 	}
+
+	corsOrigins := parseList(os.Getenv("CORS_ALLOWED_ORIGINS"))
+	slog.Info("config loaded", "port", port, "cors_origin_count", len(corsOrigins))
 
 	return Config{
 		DatabaseURL:        databaseURL,
 		Port:               port,
-		CORSAllowedOrigins: parseList(os.Getenv("CORS_ALLOWED_ORIGINS")),
+		CORSAllowedOrigins: corsOrigins,
 	}, nil
 }
 
 func validatePort(port string) error {
+	slog.Debug("function entry", "function", "config.validatePort", "port", port)
+	defer slog.Debug("function exit", "function", "config.validatePort")
+
 	parsed, err := strconv.Atoi(port)
 	if err != nil || parsed < 1 || parsed > 65535 {
+		slog.Warn("port validation failed", "port", port)
 		return fmt.Errorf("PORT must be a number between 1 and 65535")
 	}
 
@@ -48,6 +62,9 @@ func validatePort(port string) error {
 }
 
 func parseList(value string) []string {
+	slog.Debug("function entry", "function", "config.parseList", "empty", strings.TrimSpace(value) == "")
+	defer slog.Debug("function exit", "function", "config.parseList")
+
 	parts := strings.Split(value, ",")
 	values := make([]string, 0, len(parts))
 	for _, part := range parts {
@@ -58,5 +75,6 @@ func parseList(value string) []string {
 		values = append(values, trimmed)
 	}
 
+	slog.Debug("list parsed", "count", len(values))
 	return values
 }
