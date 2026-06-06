@@ -198,6 +198,7 @@ type listingResponse struct {
 	SourceUpdatedAt *time.Time `json:"sourceUpdatedAt"`
 	IngestedAt      time.Time  `json:"ingestedAt"`
 	IngestionRunID  string     `json:"ingestionRunId"`
+	RegistrationIDs []string   `json:"registrationIds"`
 }
 
 func listingDetailHandler(provider ListingProvider) http.HandlerFunc {
@@ -255,6 +256,7 @@ func listingDetailHandler(provider ListingProvider) http.HandlerFunc {
 			SourceUpdatedAt: listing.SourceUpdatedAt,
 			IngestedAt:      listing.IngestedAt,
 			IngestionRunID:  listing.IngestionRunID,
+			RegistrationIDs: listing.RegistrationIDs,
 		})
 	}
 }
@@ -289,7 +291,7 @@ type mapListingProperties struct {
 	IngestedAt      *time.Time `json:"ingestedAt,omitempty"`
 }
 
-const individualListingsMinZoom = 16
+const individualListingsMinZoom = 17
 
 func mapListingsHandler(provider MapProvider) http.HandlerFunc {
 	slog.Debug("function entry", "function", "httpapi.mapListingsHandler")

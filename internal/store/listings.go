@@ -35,6 +35,7 @@ type Listing struct {
 	SourceUpdatedAt *time.Time
 	IngestedAt      time.Time
 	IngestionRunID  string
+	RegistrationIDs []string
 }
 
 type Metadata struct {
@@ -102,19 +103,25 @@ func (r *ListingsRepository) GetListing(ctx context.Context, id string) (Listing
 
 	err := r.db.QueryRow(ctx, `
 		SELECT
-			id,
-			address,
-			postal_code,
-			property_type,
-			ward_number,
-			ward_name,
-			latitude,
-			longitude,
-			source_updated_at,
-			ingested_at,
-			ingestion_run_id::text
-		FROM "Listings"
-		WHERE id = $1
+			listing.id,
+			listing.address,
+			listing.postal_code,
+			listing.property_type,
+			listing.ward_number,
+			listing.ward_name,
+			listing.latitude,
+			listing.longitude,
+			listing.source_updated_at,
+			listing.ingested_at,
+			listing.ingestion_run_id::text,
+			ARRAY(
+				SELECT registration.id
+				FROM "Listings" AS registration
+				WHERE registration.address = listing.address
+				ORDER BY registration.id
+			)
+		FROM "Listings" AS listing
+		WHERE listing.id = $1
 	`, id).Scan(
 		&listing.ID,
 		&listing.Address,
@@ -127,6 +134,7 @@ func (r *ListingsRepository) GetListing(ctx context.Context, id string) (Listing
 		&sourceUpdatedAt,
 		&listing.IngestedAt,
 		&listing.IngestionRunID,
+		&listing.RegistrationIDs,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
