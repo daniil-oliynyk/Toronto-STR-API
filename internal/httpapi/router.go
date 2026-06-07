@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -42,10 +43,16 @@ type Dependencies struct {
 	MapProvider      MapProvider
 	StatsProvider    StatsProvider
 	CORSOrigins      []string
+	InternalAPIKey   string
 }
 
 func NewRouter(deps Dependencies) http.Handler {
-	slog.Debug("function entry", "function", "httpapi.NewRouter", "cors_origin_count", len(deps.CORSOrigins))
+	slog.Debug(
+		"function entry",
+		"function", "httpapi.NewRouter",
+		"cors_origin_count", len(deps.CORSOrigins),
+		"internal_api_key_configured", deps.InternalAPIKey != "",
+	)
 	defer slog.Debug("function exit", "function", "httpapi.NewRouter")
 
 	router := chi.NewRouter()
@@ -57,10 +64,13 @@ func NewRouter(deps Dependencies) http.Handler {
 
 	router.Get("/healthz", healthzHandler)
 	router.Get("/readyz", readyzHandler(deps.ReadinessChecker))
-	router.Get("/api/meta", metaHandler(deps.MetadataProvider))
-	router.Get("/api/listings/map", mapListingsHandler(deps.MapProvider))
-	router.Get("/api/listings/{id}", listingDetailHandler(deps.ListingProvider))
-	router.Get("/api/stats/wards", wardStatsHandler(deps.StatsProvider))
+	router.Route("/api", func(api chi.Router) {
+		api.Use(internalAPIKeyMiddleware(deps.InternalAPIKey))
+		api.Get("/meta", metaHandler(deps.MetadataProvider))
+		api.Get("/listings/map", mapListingsHandler(deps.MapProvider))
+		api.Get("/listings/{id}", listingDetailHandler(deps.ListingProvider))
+		api.Get("/stats/wards", wardStatsHandler(deps.StatsProvider))
+	})
 
 	return router
 }
@@ -104,6 +114,32 @@ func corsMiddleware(allowedOrigins []string) func(http.Handler) http.Handler {
 			if r.Method == http.MethodOptions {
 				slog.InfoContext(r.Context(), "cors preflight handled", "origin", origin, "path", r.URL.Path, "status", http.StatusNoContent)
 				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func internalAPIKeyMiddleware(expectedKey string) func(http.Handler) http.Handler {
+	slog.Debug("function entry", "function", "httpapi.internalAPIKeyMiddleware", "configured", expectedKey != "")
+	defer slog.Debug("function exit", "function", "httpapi.internalAPIKeyMiddleware")
+
+	if expectedKey == "" {
+		return func(next http.Handler) http.Handler {
+			return next
+		}
+	}
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			providedKey := r.Header.Get("X-Internal-API-Key")
+			if subtle.ConstantTimeCompare([]byte(providedKey), []byte(expectedKey)) != 1 {
+				slog.WarnContext(r.Context(), "internal api key rejected", "method", r.Method, "path", r.URL.Path, "status", http.StatusUnauthorized)
+				writeJSON(w, http.StatusUnauthorized, map[string]string{
+					"error": "unauthorized",
+				})
 				return
 			}
 

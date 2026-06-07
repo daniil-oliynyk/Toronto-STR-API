@@ -62,6 +62,7 @@ func main() {
 		MapProvider:      listingsRepository,
 		StatsProvider:    listingsRepository,
 		CORSOrigins:      cfg.CORSAllowedOrigins,
+		InternalAPIKey:   cfg.InternalAPIKey,
 	})
 
 	server := &http.Server{

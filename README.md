@@ -12,3 +12,4 @@ Optional:
 
 - `PORT`: API port, defaults to `8080`.
 - `CORS_ALLOWED_ORIGINS`: comma-separated frontend origins.
+- `INTERNAL_API_KEY`: when set, `/api/*` routes require a matching `X-Internal-API-Key` header from the Next.js proxy. Use the same value in the frontend deployment.

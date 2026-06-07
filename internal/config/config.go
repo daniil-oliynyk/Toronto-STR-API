@@ -13,6 +13,7 @@ type Config struct {
 	DatabaseURL        string
 	Port               string
 	CORSAllowedOrigins []string
+	InternalAPIKey     string
 }
 
 func Load() (Config, error) {
@@ -39,12 +40,19 @@ func Load() (Config, error) {
 	}
 
 	corsOrigins := parseList(os.Getenv("CORS_ALLOWED_ORIGINS"))
-	slog.Info("config loaded", "port", port, "cors_origin_count", len(corsOrigins))
+	internalAPIKey := strings.TrimSpace(os.Getenv("INTERNAL_API_KEY"))
+	slog.Info(
+		"config loaded",
+		"port", port,
+		"cors_origin_count", len(corsOrigins),
+		"internal_api_key_configured", internalAPIKey != "",
+	)
 
 	return Config{
 		DatabaseURL:        databaseURL,
 		Port:               port,
 		CORSAllowedOrigins: corsOrigins,
+		InternalAPIKey:     internalAPIKey,
 	}, nil
 }
 
