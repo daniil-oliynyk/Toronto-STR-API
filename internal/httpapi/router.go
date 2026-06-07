@@ -291,7 +291,7 @@ type mapListingProperties struct {
 	IngestedAt      *time.Time `json:"ingestedAt,omitempty"`
 }
 
-const individualListingsMinZoom = 17
+const individualListingsMinZoom = 16
 
 func mapListingsHandler(provider MapProvider) http.HandlerFunc {
 	slog.Debug("function entry", "function", "httpapi.mapListingsHandler")
